@@ -5,7 +5,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [main, ci/cache-reuse-validate]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   HBX_BASENAME: vyper-hol
@@ -59,6 +60,17 @@ jobs:
         with:
           polyml-rev: ${{ steps.polyml.outputs.polyml-rev }}
           holbuild-rev: ${{ steps.holbuild.outputs.holbuild-rev }}
+
+      - name: Download the first validation run's build (fork only)
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: vyper-hol-hbx-2bf4053edd4ddf05fde64075a82787d061dee8a7
+          run-id: 40000391544
+          github-token: ${{ github.token }}
+          path: seed
+
+      - name: Seed the cache with it (fork only)
+        run: holbuild import seed/vyper-hol.hbx
 
       - name: Build schema-2 HOL toolchain
         run: holbuild buildhol
