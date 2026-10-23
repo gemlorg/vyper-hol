@@ -1,0 +1,60 @@
+name: 'Restore holbuild cache'
+description: 'Restores the HOL toolchain and the latest project cache into HOLBUILD_CACHE'
+
+# The HOL toolchains directory (~0.2 GB) and the project build outputs
+# (~10 MB) are separate cache entries, so per-run project entries stay
+# small. holbuild keys every action by its inputs, so any earlier project
+# entry is safe to restore; outputs that do not match simply miss.
+
+inputs:
+  polyml-rev:
+    description: 'Poly/ML revision from setup-polyml'
+    required: true
+  holbuild-rev:
+    description: 'holbuild revision from setup-holbuild'
+    required: true
+
+outputs:
+  project-prefix:
+    description: 'Key prefix of project cache entries'
+    value: ${{ steps.keys.outputs.project-prefix }}
+  toolchain-key:
+    description: 'Cache key of the HOL toolchain'
+    value: ${{ steps.keys.outputs.toolchain-key }}
+  toolchain-hit:
+    description: 'Whether the HOL toolchain was restored'
+    value: ${{ steps.toolchain.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Compute holbuild cache keys
+      id: keys
+      shell: bash
+      run: |
+        hol_root=$(holbuild context | sed -n 's/^package: hol \[root=\([^,]*\)\/hol, .*/\1/p')
+        if [ -z "$hol_root" ]; then
+          echo "holbuild context did not report the HOL toolchain directory" >&2
+          exit 1
+        fi
+        tool_id="${{ runner.os }}-${{ runner.arch }}-${{ inputs.polyml-rev }}-${{ inputs.holbuild-rev }}"
+        project_prefix="holbuild-v4-project-${tool_id}-"
+        echo "toolchain-key=holbuild-v4-hol-${tool_id}-$(basename "$hol_root")" >> "$GITHUB_OUTPUT"
+        echo "project-prefix=${project_prefix}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore HOL toolchain
+      id: toolchain
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/.cache/holbuild/hol-toolchains
+        key: ${{ steps.keys.outputs.toolchain-key }}
+
+    - name: Restore latest project cache
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/holbuild
+          !~/.cache/holbuild/hol-toolchains
+        key: ${{ steps.keys.outputs.project-prefix }}${{ github.sha }}
+        restore-keys: |
+          ${{ steps.keys.outputs.project-prefix }}
