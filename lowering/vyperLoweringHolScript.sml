@@ -12,8 +12,3 @@ Ancestors
   vyperCompiler
   vyperLoweringCorrect
   configuredE2ECorrectness
-  evalCompilerMemoryStores
-  evalCompilerExternalCalls
-  evalCompilerNameCollisions
-  evalCompilerSliceBuffers
-  evalCompilerPhiPointers
