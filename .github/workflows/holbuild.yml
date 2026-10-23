@@ -22,7 +22,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      holbuild-cache-key: ${{ steps.cache-key.outputs.snapshot-key }}
+      project-cache-prefix: ${{ steps.cache.outputs.project-prefix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -54,67 +54,28 @@ jobs:
       - name: Configure holbuild cache
         run: echo "HOLBUILD_CACHE=$HOME/.cache/holbuild" >> "$GITHUB_ENV"
 
-      - name: Compute holbuild cache keys
-        id: cache-key
-        run: |
-          toolchain_key="holbuild-v3-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.holbuild.outputs.holbuild-rev }}"
-          compatibility_hash="${{ hashFiles('holproject.toml', 'VYPER_PIN') }}"
-          build_prefix="holbuild-v3-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.polyml.outputs.polyml-rev }}-${{ steps.holbuild.outputs.holbuild-rev }}-${compatibility_hash}"
-          snapshot_key="${build_prefix}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          echo "toolchain-key=${toolchain_key}" >> "$GITHUB_OUTPUT"
-          echo "build-prefix=${build_prefix}" >> "$GITHUB_OUTPUT"
-          echo "snapshot-key=${snapshot_key}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore latest compatible project snapshot
-        id: cache-holbuild-project
-        uses: actions/cache/restore@v6
+      - uses: ./.github/actions/restore-holbuild-cache
+        id: cache
         with:
-          path: ~/.cache/holbuild
-          key: ${{ steps.cache-key.outputs.snapshot-key }}
-          restore-keys: |
-            ${{ steps.cache-key.outputs.build-prefix }}-
-
-      - name: Restore holbuild toolchain cache on project snapshot miss
-        id: cache-holbuild-toolchain
-        if: ${{ steps.cache-holbuild-project.outputs.cache-matched-key == '' }}
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/.cache/holbuild
-          key: ${{ steps.cache-key.outputs.toolchain-key }}
-
-      - name: Report restored holbuild cache
-        env:
-          PROJECT_CACHE_HIT: ${{ steps.cache-holbuild-project.outputs.cache-hit }}
-          PROJECT_CACHE_KEY: ${{ steps.cache-holbuild-project.outputs.cache-matched-key }}
-          TOOLCHAIN_CACHE_HIT: ${{ steps.cache-holbuild-toolchain.outputs.cache-hit }}
-          TOOLCHAIN_CACHE_KEY: ${{ steps.cache-holbuild-toolchain.outputs.cache-matched-key }}
-        run: |
-          echo "project cache hit: ${PROJECT_CACHE_HIT:-false}"
-          echo "project cache key: ${PROJECT_CACHE_KEY:-<none>}"
-          echo "toolchain cache hit: ${TOOLCHAIN_CACHE_HIT:-false}"
-          echo "toolchain cache key: ${TOOLCHAIN_CACHE_KEY:-<none>}"
+          polyml-rev: ${{ steps.polyml.outputs.polyml-rev }}
+          holbuild-rev: ${{ steps.holbuild.outputs.holbuild-rev }}
 
       - name: Build schema-2 HOL toolchain
         run: holbuild buildhol
 
-      - name: Save holbuild toolchain cache after buildhol
+      - name: Save HOL toolchain cache
+        if: ${{ steps.cache.outputs.toolchain-hit != 'true' }}
         uses: actions/cache/save@v6
         continue-on-error: true
         with:
-          path: ~/.cache/holbuild
-          key: ${{ steps.cache-key.outputs.toolchain-key }}
+          path: ~/.cache/holbuild/hol-toolchains
+          key: ${{ steps.cache.outputs.toolchain-key }}
 
       - name: Build project with holbuild
         env:
           TMPDIR: ${{ runner.temp }}
         run: |
           holbuild --verbose -j"$(nproc)" build --skip-checkpoints --skip-proof-steps
-
-      - name: Save holbuild project snapshot
-        uses: actions/cache/save@v6
-        with:
-          path: ~/.cache/holbuild
-          key: ${{ steps.cache-key.outputs.snapshot-key }}
 
       - name: Verify no successful-build checkpoints remain
         run: |
@@ -209,12 +170,18 @@ jobs:
       - name: Configure holbuild cache
         run: echo "HOLBUILD_CACHE=$HOME/.cache/holbuild" >> "$GITHUB_ENV"
 
-      - name: Restore holbuild global cache
-        uses: actions/cache/restore@v6
+      - uses: ./.github/actions/restore-holbuild-cache
         with:
-          path: ~/.cache/holbuild
-          key: ${{ needs.build.outputs.holbuild-cache-key }}
-          fail-on-cache-miss: true
+          polyml-rev: ${{ steps.polyml.outputs.polyml-rev }}
+          holbuild-rev: ${{ steps.holbuild.outputs.holbuild-rev }}
+
+      - name: Download HBX artefact
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ env.HBX_ARTEFACT_NAME }}
+
+      - name: Import this commit's build outputs
+        run: holbuild import "$HBX_BASENAME.hbx"
 
       - name: Restore Vyper test exports
         uses: actions/cache/restore@v6
@@ -232,6 +199,7 @@ jobs:
         run: cat tests/vyper-coverage-report.txt
 
       - name: Run Vyper test group ${{ matrix.group }}
+        id: tests
         env:
           TMPDIR: ${{ runner.temp }}
         run: |
@@ -250,6 +218,7 @@ jobs:
           targets=$(echo "$tests" | tail -n +$((start + 1)) | head -n "$per_group" | sed 's/Script\.sml$/Theory/' | tr '\n' ' ')
           echo "Building: $targets"
           holbuild --verbose -j"$(nproc)" build --skip-checkpoints --skip-proof-steps $targets
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
 
       - name: Verify no successful-build checkpoints remain
         run: |
@@ -258,6 +227,78 @@ jobs:
             find .holbuild/checkpoints \( -name '*.save' -o -name '*.save.ok' \) 2>/dev/null | head -50 >&2
             exit 1
           fi
+
+      - name: Export test results
+        env:
+          TARGETS: ${{ steps.tests.outputs.targets }}
+        run: |
+          if [ "${{ matrix.group }}" = 0 ]; then
+            TARGETS="$TARGETS vyperTestCoverageReportTheory"
+          fi
+          holbuild export -o "vyper-tests-${{ matrix.group }}.hbx" $TARGETS
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: vyper-tests-hbx-${{ github.sha }}-${{ matrix.group }}
+          path: vyper-tests-${{ matrix.group }}.hbx
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  # One small cache entry per run: an empty cache plus this commit's build and
+  # test outputs. Runs even when the workflow is cancelled, so finished work
+  # is kept. Merge-queue refs are never restored from, so they save nothing.
+  save-holbuild-cache:
+    needs: [build, vyper-tests]
+    if: ${{ always() && needs.build.result == 'success' && github.event_name != 'merge_group' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-polyml
+
+      - name: Get minimum holbuild version from holproject.toml
+        id: holbuild-version
+        run: |
+          holbuild_ref="$(python3 - <<'PY'
+          import tomllib
+          with open("holproject.toml", "rb") as f:
+              data = tomllib.load(f)
+          print("v" + data["holbuild"]["minimum_version"])
+          PY
+          )"
+          echo "ref=$holbuild_ref" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-holbuild
+        with:
+          holbuild-ref: ${{ steps.holbuild-version.outputs.ref }}
+
+      - name: Configure holbuild cache
+        run: echo "HOLBUILD_CACHE=$HOME/.cache/holbuild" >> "$GITHUB_ENV"
+
+      - name: Download build and test HBX artefacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: vyper-*-hbx-${{ github.sha }}*
+          path: hbx
+          merge-multiple: true
+
+      - name: Import build and test outputs
+        run: |
+          for archive in hbx/*.hbx; do
+            holbuild import "$archive"
+          done
+
+      - name: Save project cache
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cache/holbuild
+            !~/.cache/holbuild/hol-toolchains
+          key: ${{ needs.build.outputs.project-cache-prefix }}${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   holbuild-success:
     if: always()
