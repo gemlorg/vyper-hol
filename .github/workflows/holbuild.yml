@@ -281,6 +281,10 @@ jobs:
           echo "Building: $targets"
           holbuild --verbose -j"$(nproc)" build --skip-checkpoints --skip-proof-steps $targets
 
+      - name: Report test counts and failures
+        if: always()
+        run: grep -rh "^\[vyper-tests\]\|^Failure in test\|^\[vyper-coverage\] file=" .holbuild/logs/current/ || true
+
       - name: Verify no successful-build checkpoints remain
         run: |
           if find .holbuild/checkpoints \( -name '*.save' -o -name '*.save.ok' \) 2>/dev/null | grep -q .; then

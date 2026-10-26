@@ -1197,6 +1197,8 @@ fun make_definitions_for_file (id, json_path) = let
   val traces_prefix = String.concat ["traces_", id, "_"]
   val test_name_prefix = String.concat ["name_", id, "_"]
   fun define_traces i (name, traces) = let
+    (* VERIFY ONLY: drop test_ceil's deployment so its calls must fail. *)
+    val traces = if name = "test_ceil" then tl traces else traces
     val trs = mk_list(traces, trace_ty)
     val tn = Int.toString i
     val vn = traces_prefix ^ tn
