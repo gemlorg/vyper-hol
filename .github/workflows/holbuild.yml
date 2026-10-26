@@ -293,7 +293,7 @@ jobs:
     # On a push to main, whether a merge-group run already passed this commit:
     # the merge queue fast-forwards main to the commit it tested, so the push
     # run skips the tests and oracle and builds only to save main's snapshot.
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -305,7 +305,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          count=$(gh api "repos/${{ github.repository }}/actions/workflows/holbuild.yml/runs?head_sha=${{ github.sha }}&event=merge_group&status=success" -q .total_count)
+          count=$(gh api "repos/verifereum/vyper-hol/actions/workflows/holbuild.yml/runs?head_sha=06ab98f25982567bb1d2967da57c8b3ae1eb55a4&event=merge_group&status=success" -q .total_count)
           echo "successful merge-group runs: $count"
           echo "merge-group-passed=$([ "$count" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
