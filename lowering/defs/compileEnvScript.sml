@@ -1476,3 +1476,4 @@ Definition elem_size_in_location_def:
     else
       type_memory_bytes cenv elem_ty
 End
+(* CI verification: comment-only edit. *)
