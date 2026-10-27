@@ -2203,3 +2203,4 @@ Definition load_contract_def:
           | (_, am', rqs) => INL (finalize_pending_deletions
                                     (am' with sources updated_by CONS (addr, mods)), rqs)
 End
+(* CI verification: comment-only edit. *)
