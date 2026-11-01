@@ -1,0 +1,83 @@
+name: seq80-probe
+on:
+  pull_request:
+    branches: [seq80-probe-base]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+concurrency:
+  group: seq80-probe-${{ (github.event.action == 'edited' && !github.event.changes.base) && github.run_id || github.event.pull_request.number || (github.event_name == 'push' && github.sha) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  toolchain:
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  build:
+    name: "${{ (github.event.action == 'edited' && !github.event.changes.base) && 'build (no-op edit)' || 'build' }}"
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  compiler:
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  witnesses:
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    needs: compiler
+    strategy:
+      matrix:
+        group: [0, 1]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  build-rollup:
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    needs: [build, witnesses]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  tested:
+    if: github.event_name == 'push'
+    outputs:
+      merge-group-passed: 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  test-deps:
+    if: ${{ !cancelled() && needs.toolchain.result == 'success' && needs.tested.outputs.merge-group-passed != 'true' && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base))) }}
+    needs: [toolchain, tested]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  python-o1-oracle:
+    if: ${{ !cancelled() && needs.tested.outputs.merge-group-passed != 'true' && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base))) }}
+    needs: tested
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  export-vyper-tests:
+    if: ${{ !cancelled() && needs.tested.outputs.merge-group-passed != 'true' && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base))) }}
+    needs: tested
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  vyper-tests:
+    if: ${{ !cancelled() && needs.test-deps.result == 'success' && needs.export-vyper-tests.result == 'success' && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base))) }}
+    needs: [test-deps, export-vyper-tests]
+    strategy:
+      matrix:
+        group: [0, 1]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
+  holbuild-success:
+    name: "${{ (github.event.action == 'edited' && !github.event.changes.base) && 'holbuild-success (no-op edit)' || 'holbuild-success' }}"
+    if: always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action != 'edited' || github.event.changes.base)))
+    needs: [toolchain, build, compiler, witnesses, build-rollup, tested, test-deps, python-o1-oracle, export-vyper-tests, vyper-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "action=${{ github.event.action }} base_changed=${{ toJSON(github.event.changes.base) }}"; sleep 90
